@@ -27,7 +27,7 @@ jobs:
       matrix:
         shard: [0, 1]
     env:
-      HF_HOME: ${{ runner.temp }}/hf-cache
+      HF_HOME: /tmp/trailer-observatory-hf-cache
       HF_HUB_DISABLE_TELEMETRY: '1'
       TOKENIZERS_PARALLELISM: 'false'
       OMP_NUM_THREADS: '4'
@@ -46,7 +46,7 @@ jobs:
           cache-dependency-path: requirements-worker.txt
       - uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:
-          path: ${{ runner.temp }}/hf-cache
+          path: /tmp/trailer-observatory-hf-cache
           key: smolvlm256-7e3e67ed-v1
       - name: Install CPU worker dependencies
         run: |

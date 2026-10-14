@@ -308,6 +308,9 @@ def workflow_guard(content: bytes, expected: bytes):
         raise ObservatoryError("Standard Linux runner / concurrency guard is missing")
     if b"upload-artifact" in content:
         raise ObservatoryError("Artifact uploads are forbidden; export uses free job logs")
+    for block in re.findall(rb"(?m)^    env:\n((?:      .*\n)*)",content):
+        if re.search(rb"\$\{\{[^}]*\brunner\.",block):
+            raise ObservatoryError("GitHub runner context is unavailable in job-level env; use a job-safe literal cache path")
 
 
 def evidence_archive(directory):

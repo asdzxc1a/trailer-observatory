@@ -140,6 +140,11 @@ class GuardProtocolTests(unittest.TestCase):
         with self.assertRaises(o.ObservatoryError):o.workflow_guard(changed,expected)
     def test_reviewed_standard_workflow_is_accepted(self):
         expected=(o.ROOT/o.WORKFLOW).read_bytes();o.workflow_guard(expected,expected)
+    def test_job_env_rejects_runner_context_before_remote_dispatch(self):
+        valid=(o.ROOT/o.WORKFLOW).read_bytes()
+        invalid=valid.replace(b"HF_HOME: /tmp/trailer-observatory-hf-cache",b"HF_HOME: ${{ runner.temp }}/hf-cache")
+        # An exact reviewed-byte match alone cannot establish Actions syntax.
+        with self.assertRaises(o.ObservatoryError):o.workflow_guard(invalid,invalid)
     @patch.object(o,"gh_json")
     def test_private_worker_is_refused_before_dispatch(self,api):
         api.return_value={"private":True,"visibility":"private"}
