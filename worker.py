@@ -17,7 +17,7 @@ import time
 from urllib.request import Request, urlopen
 from observatory import (MODEL, MODEL_REVISION, VERSION, MAX_ARCHIVE_BYTES, MAX_CACHE_BYTES,
                          ObservatoryError, sha256, validate_manifest, youtube_id,
-                         export_review, dump_json,emit_log_archive)
+                         disney_page_id,export_review, dump_json,emit_log_archive)
 
 CAPTION_PROMPT = (
     "Describe only visible image content in two short sentences: subjects, their pose, "
@@ -83,7 +83,7 @@ def download_public(trailer, directory):
         if trailer.get("channel_id") and info.get("channel_id") != trailer["channel_id"]:
             raise ObservatoryError("Source does not match declared official channel")
         duration = float(info.get("duration") or 0)
-        if duration <= trailer["start_second"]+trailer["seconds"]-1:
+        if duration < trailer["start_second"]+trailer["seconds"]-1:
             raise ObservatoryError(f"Declared window contains a wholly absent bin at reported duration {duration}")
         if duration > 600:
             raise ObservatoryError("References must be trailers no longer than 10 minutes")
@@ -91,7 +91,76 @@ def download_public(trailer, directory):
         source = Path(ydl.prepare_filename(info))
         if not source.is_file() or source.stat().st_size > 100_000_000:
             raise ObservatoryError("Source download missing or exceeds 100 MB cap")
-    return source, {k: info.get(k) for k in ("id", "title", "channel_id", "channel", "duration", "upload_date", "webpage_url", "fps", "format_id")}
+    metadata={k: info.get(k) for k in ("id", "title", "channel_id", "channel", "duration", "upload_date", "webpage_url", "fps", "format_id")}
+    return source,dict(metadata,source_platform="youtube",actual_source_url=trailer["url"])
+
+
+PUBLIC_DISNEY_CDN_HOSTS={"mh-kaltura.akamaized.net","kaltura.akamaized.net","cdnvideo.dolimg.com"}
+
+
+def parse_disney_embed(webpage,expected_id):
+    match=re.search(r"Disney\.EmbedVideo\s*=\s*",webpage)
+    if not match:raise ObservatoryError("Official Disney embed JSON not found")
+    data,_=json.JSONDecoder().raw_decode(webpage[match.end():].lstrip())
+    video=data.get("video",{})
+    if video.get("id")!=expected_id:raise ObservatoryError("Disney embed resolved a different reference")
+    if video.get("expired"):raise ObservatoryError("Publisher marks this public trailer expired")
+    return video
+
+
+def disney_flavor(video):
+    from urllib.parse import urlparse
+    choices=[]
+    for flavor in video.get("flavors",[]):
+        url=flavor.get("url","");parsed=urlparse(url)
+        try:height=int(flavor.get("height") or 0)
+        except (ValueError,TypeError):continue
+        if parsed.scheme!="https" or parsed.hostname not in PUBLIC_DISNEY_CDN_HOSTS or parsed.username or parsed.password or parsed.port:
+            continue
+        # Only publisher-provided progressive MP4; no ks/token alterations,
+        # encrypted HLS, entitlement session or generic URL extraction.
+        if flavor.get("format")!="mp4" or not 1<=height<=480:continue
+        if "progressive" not in flavor.get("security_profile",[]):continue
+        choices.append((height,int(flavor.get("bitrate") or 0),flavor))
+    if not choices:raise ObservatoryError("No public allowed-host progressive Disney flavor at 480p or below")
+    return max(choices,key=lambda choice:choice[:2])[2]
+
+
+def download_disney_mirror(trailer,directory,requested_error):
+    from urllib.parse import urlparse
+    mirror=trailer["public_mirror"];reference_id=disney_page_id(mirror["url"])
+    embed_url=f"https://video.disney.com/embed/{reference_id}"
+    request=Request(embed_url,headers={"User-Agent":"Mozilla/5.0","Accept":"text/html"})
+    with urlopen(request,timeout=30) as response:
+        if urlparse(response.geturl()).hostname!="video.disney.com":raise ObservatoryError("Unexpected Disney embed redirect")
+        page=response.read(2_000_001)
+        if len(page)>2_000_000:raise ObservatoryError("Disney embed metadata exceeds cap")
+    video=parse_disney_embed(page.decode("utf-8"),reference_id)
+    expected=mirror.get("expected_title")
+    if expected:
+        normalize=lambda text:" ".join(text.replace("’","'").lower().split())
+        if normalize(video.get("title",""))!=normalize(expected):raise ObservatoryError("Official mirror title differs from declared version")
+    flavor=disney_flavor(video)
+    source=directory/"source.mp4"
+    request=Request(flavor["url"],headers={"User-Agent":"Mozilla/5.0","Referer":mirror["url"]})
+    # Use the publisher's anonymous URL unchanged. All media bytes stay remote.
+    with urlopen(request,timeout=60) as response,source.open("wb") as target:
+        final=urlparse(response.geturl())
+        if final.scheme!="https" or final.hostname not in PUBLIC_DISNEY_CDN_HOSTS:raise ObservatoryError("Disney media redirected outside allowed public CDN")
+        total=0
+        while True:
+            chunk=response.read(65536)
+            if not chunk:break
+            total+=len(chunk)
+            if total>100_000_000:raise ObservatoryError("Official mirror exceeds 100 MB download cap")
+            target.write(chunk)
+    if not source.stat().st_size:raise ObservatoryError("Official mirror is empty")
+    return source,{"id":reference_id,"title":video.get("title"),"duration":video.get("duration_sec"),
+        "upload_date":video.get("publish_date"),"source_platform":"disney_official","actual_source_url":mirror["url"],
+        "official_embed_url":embed_url,"publisher_page_sha256":sha256(page),"flavor_id":flavor.get("id"),
+        "flavor_width":flavor.get("width"),"flavor_height":flavor.get("height"),
+        "youtube_equivalence":"not_established","version_note":mirror.get("version_note","Official public alternate; equivalence to requested YouTube version unverified"),
+        "requested_youtube_error":str(requested_error)[:1500]}
 
 
 def probe_decoded_end(source):
@@ -228,7 +297,10 @@ def make_rows(trailer, metadata, paths, sample_times, targets, root, captioner, 
         second = trailer["start_second"]+index
         row = {"schema_version": 1, "trailer_id": trailer["id"], "second": second,
                "bin_start_seconds": second, "bin_end_seconds_exclusive": second+1,
-               "source_url": trailer["url"], "source_video_id": metadata["id"],
+               "source_url": metadata["actual_source_url"], "source_video_id": metadata["id"],
+               "source_platform":metadata["source_platform"],"requested_source_url":trailer["url"],
+               "requested_source_video_id":youtube_id(trailer["url"]),
+               "youtube_equivalence":metadata.get("youtube_equivalence","requested_source_downloaded"),
                "source_metadata": metadata, "sample_time_seconds": targets[index],
                "nominal_sample_time_seconds": second+0.5,
                "decoded_frame_time_seconds": sample_times[index],
@@ -292,7 +364,10 @@ def worker(manifest, out, shard, shards):
         metadata = None
         try:
             with tempfile.TemporaryDirectory(prefix="public-trailer-") as temporary:
-                source,metadata = download_public(trailer,Path(temporary))
+                try:source,metadata = download_public(trailer,Path(temporary))
+                except Exception as source_error:
+                    if not trailer.get("public_mirror"):raise
+                    source,metadata=download_disney_mirror(trailer,Path(temporary),source_error)
                 metadata["source_file_sha256"] = sha256(source.read_bytes())
                 decoded_end,eof_precision=probe_decoded_end(source)
                 metadata["actual_decoded_duration_seconds"]=decoded_end

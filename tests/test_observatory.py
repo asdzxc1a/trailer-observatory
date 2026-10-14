@@ -78,6 +78,14 @@ class ManifestTests(unittest.TestCase):
                     "https://youtube.com:443/watch?v=abcdefghijk",
                     "https://youtube.com/playlist?list=test"]:
             with self.assertRaises(o.ObservatoryError):o.youtube_id(url)
+    def test_official_mirror_url_and_duplicate_windows(self):
+        url="https://video.disney.com/watch/synthetic-trailer-0123456789abcdef01234567"
+        self.assertEqual(o.disney_page_id(url),"0123456789abcdef01234567")
+        for bad in [url.replace("video.disney.com","evil.test"),url+"?token=x",url.replace("https:","http:")]:
+            with self.assertRaises(o.ObservatoryError):o.disney_page_id(bad)
+        m=manifest();m["trailers"][0]["public_mirror"]={"url":url}
+        m["trailers"].append(dict(m["trailers"][0],id="other",url="https://youtu.be/12345678901"));m["expected_observations"]=6
+        with self.assertRaises(o.ObservatoryError):o.validate_manifest(m)
 
     def test_shards_preserve_all_bins(self):
         m=manifest();m["trailers"].append({"id":"test-b","url":"https://youtu.be/12345678901","start_second":0,"seconds":4});m["expected_observations"]=7
@@ -115,6 +123,14 @@ class EvidenceTests(unittest.TestCase):
         self.rows[0]["frame_path"]="../outside";self.assertFalse(self.audit()["complete"])
     def test_wrong_source_refuses_completion(self):
         self.rows[0]["source_url"]="https://youtu.be/12345678901";self.assertFalse(self.audit()["complete"])
+    def test_mirror_evidence_requires_actual_identity_and_unverified_equivalence(self):
+        m=manifest();url="https://video.disney.com/watch/synthetic-trailer-0123456789abcdef01234567"
+        m["trailers"][0]["public_mirror"]={"url":url}
+        for row in self.rows:
+            row.update(source_url=url,source_video_id="0123456789abcdef01234567",source_platform="disney_official",requested_source_url=m["trailers"][0]["url"],youtube_equivalence="not_established")
+        self.assertTrue(o.audit_rows(self.rows,m,self.root)["complete"])
+        self.rows[0]["youtube_equivalence"]="identical"
+        self.assertFalse(o.audit_rows(self.rows,m,self.root)["complete"])
     def test_failure_rows_have_timestamps_without_fake_captions(self):
         failed=worker.failed_rows(manifest()["trailers"][0],"access denied")
         audit=o.audit_rows(failed,manifest());self.assertEqual(audit["documented_observations"],0);self.assertEqual(audit["failed_bins"],3)
@@ -274,6 +290,24 @@ class LogTransportTests(unittest.TestCase):
         import gzip
         payload=gzip.compress(info.tobuf()+b"\0"*1024)
         with self.assertRaises(o.ObservatoryError):self.extract(self.make_log(payload))
+
+
+class OfficialMirrorTests(unittest.TestCase):
+    def video(self):
+        return {"id":"0123456789abcdef01234567","title":"Synthetic public trailer","flavors":[
+            {"url":"https://mh-kaltura.akamaized.net/public/synthetic.mp4?publisher_signature=unchanged","format":"mp4","height":"360","bitrate":900,"security_profile":["progressive"]},
+            {"url":"https://mh-kaltura.akamaized.net/public/large.mp4","format":"mp4","height":"1080","bitrate":4000,"security_profile":["progressive"]}]}
+    def test_parse_exact_publisher_json_and_choose_bounded_progressive_flavor(self):
+        video=self.video();page="<script>Disney.EmbedVideo="+json.dumps({"video":video})+";</script>"
+        parsed=worker.parse_disney_embed(page,video["id"])
+        self.assertEqual(worker.disney_flavor(parsed)["url"],video["flavors"][0]["url"])
+        self.assertIn("publisher_signature=unchanged",worker.disney_flavor(parsed)["url"])
+    def test_wrong_publisher_identity_is_rejected(self):
+        with self.assertRaises(o.ObservatoryError):worker.parse_disney_embed("Disney.EmbedVideo="+json.dumps({"video":self.video()}),"111111111111111111111111")
+    def test_external_cdn_and_encrypted_format_are_rejected(self):
+        for change in [{"url":"https://evil.test/video.mp4"},{"format":"mp4_access"},{"security_profile":["encrypted_hls"]}]:
+            video=self.video();video["flavors"]=video["flavors"][:1];video["flavors"][0].update(change)
+            with self.assertRaises(o.ObservatoryError):worker.disney_flavor(video)
 
 
 if __name__=="__main__":unittest.main()

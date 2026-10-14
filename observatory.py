@@ -72,6 +72,16 @@ def youtube_id(url: str) -> str:
     return video
 
 
+def disney_page_id(url):
+    if not isinstance(url,str) or len(url)>300:raise ObservatoryError("Expected a short official Disney video page URL")
+    parsed=urlparse(url)
+    if parsed.scheme!="https" or parsed.hostname!="video.disney.com" or parsed.username or parsed.password or parsed.port or parsed.query or parsed.fragment:
+        raise ObservatoryError("Mirror must be an HTTPS video.disney.com page without credentials/query")
+    match=re.fullmatch(r"/watch/[a-z0-9-]+-([a-f0-9]{24})",parsed.path)
+    if not match:raise ObservatoryError("Mirror must be an individual official Disney watch page")
+    return match.group(1)
+
+
 def integer(value, label, minimum, maximum):
     if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
         raise ObservatoryError(f"{label} must be an integer from {minimum} through {maximum}")
@@ -94,7 +104,7 @@ def validate_manifest(manifest: dict) -> dict:
     seen, windows, normalized = set(), {}, []
     for trailer in trailers:
         if not isinstance(trailer, dict) or set(trailer) - {
-            "id", "url", "title", "start_second", "seconds", "channel_id", "rights_note"
+            "id", "url", "title", "start_second", "seconds", "channel_id", "rights_note", "public_mirror"
         }:
             raise ObservatoryError("Trailer manifest contains unsupported fields")
         tid = trailer.get("id", "")
@@ -117,6 +127,17 @@ def validate_manifest(manifest: dict) -> dict:
             raise ObservatoryError("channel_id must be a YouTube channel ID")
         if len(str(item.get("rights_note", ""))) > 300:
             raise ObservatoryError("rights_note is too long")
+        mirror=item.get("public_mirror")
+        if mirror is not None:
+            if not isinstance(mirror,dict) or set(mirror)-{"url","expected_title","version_note"}:
+                raise ObservatoryError("Mirror contains unsupported fields")
+            mirror_id="disney:"+disney_page_id(mirror.get("url"))
+            for a,b in windows.setdefault(mirror_id,[]):
+                if start<b and start+seconds>a:raise ObservatoryError("Same-mirror windows overlap; observed source bins must be unique")
+            windows[mirror_id].append((start,start+seconds))
+            for field in ("expected_title","version_note"):
+                if field in mirror and (not isinstance(mirror[field],str) or len(mirror[field])>300):
+                    raise ObservatoryError(f"Mirror {field} must be short public reference metadata")
         normalized.append(item)
     total = sum(t["seconds"] for t in normalized)
     if total > MAX_SECONDS:
@@ -162,7 +183,9 @@ def audit_rows(rows, manifest, evidence_root=None):
             errors.append(f"unexpected bin {key}")
             continue
         trailer = trailers[key[0]]
-        if row.get("source_url") != trailer["url"]:
+        mirror=trailer.get("public_mirror",{})
+        source_is_mirror=row.get("source_url")==mirror.get("url") and row.get("source_platform")=="disney_official"
+        if row.get("source_url") != trailer["url"] and not source_is_mirror:
             errors.append(f"wrong source URL {key}")
         if row.get("evidence_status") != "captured" or row.get("annotation_status") not in {
             "machine_unreviewed", "human_reviewed", "reused_exact_frame_unreviewed"
@@ -190,8 +213,12 @@ def audit_rows(rows, manifest, evidence_root=None):
         if not key[1] <= row["decoded_frame_time_seconds"] < key[1]+1:
             errors.append(f"decoded frame outside bin {key}")
             continue
-        if row["source_video_id"] != youtube_id(trailer["url"]):
+        actual_id=disney_page_id(mirror["url"]) if source_is_mirror else youtube_id(trailer["url"])
+        if row["source_video_id"] != actual_id:
             errors.append(f"wrong source identifier {key}")
+            continue
+        if source_is_mirror and (row.get("requested_source_url")!=trailer["url"] or row.get("youtube_equivalence")!="not_established"):
+            errors.append(f"mirror provenance/equivalence missing {key}")
             continue
         if not re.fullmatch(r"[a-f0-9]{64}", row["frame_sha256"]):
             errors.append(f"invalid hash {key}")
@@ -278,7 +305,8 @@ def export_review(rows, out, manifest):
         esc = lambda v: html.escape(str(v), quote=True)
         frame = r.get("frame_path", "")
         image = f'<img loading="lazy" src="{esc(frame)}" alt="Evidence {esc(r["second"])} seconds">' if frame else "<p>Frame unavailable</p>"
-        cards.append(f'<article data-trailer="{esc(r["trailer_id"])}"><h3>{esc(r["trailer_id"])} · {r["second"]:03d}s</h3>{image}<p>{esc(r.get("observation", ""))}</p><small>{esc(r.get("annotation_status"))} · {esc(r.get("evidence_status"))}</small><p>Inference: {esc(r.get("inference", ""))}</p><a href="{esc(r["source_url"])}&t={r["second"]}" target="_blank" rel="noopener">Public source at this second</a><details><summary>Provenance</summary><pre>{esc(json.dumps(r, indent=2))}</pre></details></article>')
+        source_link=r["source_url"]+(f'&t={r["second"]}' if r.get("source_platform")!="disney_official" else "")
+        cards.append(f'<article data-trailer="{esc(r["trailer_id"])}"><h3>{esc(r["trailer_id"])} · {r["second"]:03d}s</h3>{image}<p>{esc(r.get("observation", ""))}</p><small>{esc(r.get("annotation_status"))} · {esc(r.get("evidence_status"))}</small><p>Inference: {esc(r.get("inference", ""))}</p><a href="{esc(source_link)}" target="_blank" rel="noopener">Public source page · sample {r["second"]}s</a><details><summary>Provenance</summary><pre>{esc(json.dumps(r, indent=2))}</pre></details></article>')
     document = '''<!doctype html><meta charset="utf-8"><title>Trailer Observatory evidence review</title>
 <style>body{background:#11151c;color:#eef0f4;font:16px system-ui;margin:2rem}header{max-width:70rem}section{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1rem}article{background:#202735;padding:1rem;border-radius:8px}img{width:100%;aspect-ratio:16/9;object-fit:contain;background:black}small{color:#fcce76}a{color:#9acaff}pre{white-space:pre-wrap;word-break:break-all;font-size:11px}select{padding:.5rem;margin:1rem 0}</style>
 <header><h1>Trailer Observatory</h1><p>Exact chronological one-second bins, sampled at their midpoint. Small-model captions are machine drafts until a reviewer checks each evidence frame. Missing/failed bins never count as observations.</p><p>''' + html.escape(json.dumps(audit)) + '''</p><select id="filter"><option value="">All trailers</option>''' + "".join(f'<option>{html.escape(t["id"])}</option>' for t in manifest["trailers"]) + '''</select></header><section>''' + "".join(cards) + '''</section><script>document.querySelector('#filter').addEventListener('change',e=>document.querySelectorAll('article').forEach(a=>a.hidden=Boolean(e.target.value&&a.dataset.trailer!==e.target.value)))</script>'''

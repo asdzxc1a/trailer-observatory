@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "corpus_id": "remote-official-mirror-smoke",
+  "expected_observations": 3,
+  "trailers": [
+    {
+      "id": "encanto",
+      "url": "https://www.youtube.com/watch?v=CaimKeDcudo",
+      "title": "Disney's Encanto | Official Trailer",
+      "start_second": 25,
+      "seconds": 3,
+      "channel_id": "UC_976xMxPgzIa290Hqtk-9g",
+      "public_mirror": {
+        "url": "https://video.disney.com/watch/disney-s-encanto-official-trailer-5cd227e2fc288ebd6b4f2a72",
+        "expected_title": "Disney’s Encanto | Official Trailer",
+        "version_note": "Official Disney publisher page, September 29 2021 trailer; exact frame equivalence to YouTube version remains unverified."
+      }
+    }
+  ]
+}
