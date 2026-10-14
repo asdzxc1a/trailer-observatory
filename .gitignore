@@ -4,3 +4,17 @@ __pycache__/
 .cache/
 .evidence/
 .env*
+.venv/
+evidence/
+shards/
+source.*
+*.mp4
+*.mov
+*.webm
+*.jpg
+*.jpeg
+*.png
+*.wav
+*.mp3
+.local-state/
+test-results.txt

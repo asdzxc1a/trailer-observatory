@@ -20,7 +20,7 @@ import time
 from urllib.parse import parse_qs, urlparse
 import uuid
 
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 ROOT = Path(__file__).resolve().parent
 WORKFLOW = ".github/workflows/observe.yml"
 MODEL = "HuggingFaceTB/SmolVLM-256M-Instruct"
