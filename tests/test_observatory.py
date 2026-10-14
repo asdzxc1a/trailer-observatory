@@ -183,6 +183,10 @@ class GuardProtocolTests(unittest.TestCase):
     def test_mac_never_runs_heavy_worker(self):
         with patch.dict("os.environ",{},clear=True):
             with self.assertRaises(o.ObservatoryError):worker.hosted_guard()
+    def test_remote_missing_system_dependency_is_caught_before_source_access(self):
+        with patch.object(worker.shutil,"which",side_effect=lambda binary:None if binary=="ffmpeg" else "/usr/bin/"+binary):
+            with self.assertRaisesRegex(o.ObservatoryError,"ffmpeg"):worker.verify_media_tools()
+        with patch.object(worker.shutil,"which",side_effect=lambda binary:"/usr/bin/"+binary):worker.verify_media_tools()
     def test_ffmpeg_timestamp_provenance_parser(self):
         log="[Parsed_showinfo_1 @ test] n: 0 pts: 0 pts_time:0.008\n[Parsed_showinfo_1 @ test] n: 1 pts: 1000 pts_time:1.008\n"
         self.assertEqual(worker.parse_frame_times(log,4.5,2),[4.508,5.508])

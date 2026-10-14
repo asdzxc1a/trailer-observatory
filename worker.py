@@ -47,6 +47,11 @@ def run(arguments, timeout=300):
     return result.stdout
 
 
+def verify_media_tools():
+    missing=[name for name in ("ffmpeg","ffprobe","node") if shutil.which(name) is None]
+    if missing:raise ObservatoryError("Remote system dependencies missing before source access: "+", ".join(missing))
+
+
 def select_shard(manifest, shard, shards):
     # Greedy bin packing keeps both CPU workers close in declared duration.
     buckets, costs = [[] for _ in range(shards)], [0]*shards
@@ -278,6 +283,7 @@ def worker(manifest, out, shard, shards):
     full_manifest = validate_manifest(manifest)
     manifest = select_shard(full_manifest,shard,shards)
     if not manifest["trailers"]: return
+    verify_media_tools()
     out.mkdir(parents=True,exist_ok=True)
     rows, cache, captioner, started = [], {}, None, time.monotonic()
     source_manifest = []
