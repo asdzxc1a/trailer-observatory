@@ -36,6 +36,12 @@ class ObservatoryError(ValueError):
     pass
 
 
+class GitHubCLIError(ObservatoryError):
+    def __init__(self,message,http_status=None):
+        super().__init__(message)
+        self.http_status=http_status
+
+
 def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -288,7 +294,8 @@ def gh(arguments, input_data=None, timeout=90):
         return process.stdout
     except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired) as error:
         detail = getattr(error, "stderr", "") or str(error)
-        raise ObservatoryError(f"GitHub CLI failed: {detail[:2000]}") from error
+        status=re.search(r"HTTP\s+(\d{3})\b",detail)
+        raise GitHubCLIError(f"GitHub CLI failed: {detail[:2000]}",int(status.group(1)) if status else None) from error
 
 
 def gh_json(arguments, input_data=None):
@@ -446,7 +453,7 @@ class Client:
         owned = self._records()
         active = []
         for job in owned:
-            if job["repo"] == repo:
+            if job["repo"] == repo and job.get("dispatch_status")!="rejected":
                 runs = self.status(job["job_id"])
                 if not runs["runs"] or any(r["status"] != "completed" for r in runs["runs"]): active.append(job)
         if active:
@@ -456,7 +463,15 @@ class Client:
         record = dict(proof, job_id=job_id, manifest=manifest, created_at=time.time(), dispatch_status="unknown")
         self.state.mkdir(parents=True, exist_ok=True)
         dump_json(self.state/f"{job_id}.json", record)
-        gh(["api", "--method", "POST", f"repos/{repo}/actions/workflows/observe.yml/dispatches", "--input", "-"], json.dumps(payload))
+        try:
+            gh(["api", "--method", "POST", f"repos/{repo}/actions/workflows/observe.yml/dispatches", "--input", "-"], json.dumps(payload))
+        except GitHubCLIError as error:
+            # These API responses definitively reject the request. A transport
+            # timeout or server error stays unknown and blocks duplicate jobs.
+            if error.http_status in {401,403,404,422}:record["dispatch_status"]="rejected"
+            record["dispatch_error"]={"http_status":error.http_status,"message":str(error),"recorded_at":time.time()}
+            dump_json(self.state/f"{job_id}.json",record)
+            raise
         record["dispatch_status"] = "submitted"
         dump_json(self.state/f"{job_id}.json", record)
         return {"job_id": job_id, "repo": repo, "expected_bins": manifest["expected_observations"],

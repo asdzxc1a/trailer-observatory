@@ -156,6 +156,30 @@ class GuardProtocolTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as t:
             with self.assertRaises(o.ObservatoryError):o.Client(t).cancel("to-0123456789abcdef")
         gh.assert_not_called()
+    @patch.object(o,"gh")
+    def test_rejected_dispatch_is_preserved_without_false_active_job(self,gh):
+        gh.side_effect=o.GitHubCLIError("HTTP 422 invalid workflow",422)
+        with tempfile.TemporaryDirectory() as t:
+            client=o.Client(t)
+            with patch.object(client,"preflight",return_value={"repo":"owner/worker","commit":"test"}):
+                with self.assertRaises(o.GitHubCLIError):client.submit("owner/worker",manifest())
+            record=client._records()[0]
+            self.assertEqual(record["dispatch_status"],"rejected")
+            self.assertEqual(record["dispatch_error"]["http_status"],422)
+            gh.side_effect=None;gh.return_value=""
+            with patch.object(client,"preflight",return_value={"repo":"owner/worker","commit":"test"}),patch.object(client,"status") as status:
+                self.assertEqual(client.submit("owner/worker",manifest())["status"],"submitted")
+                status.assert_not_called()
+    @patch.object(o,"gh")
+    def test_transport_failure_stays_unknown_and_blocks_duplicate_dispatch(self,gh):
+        gh.side_effect=o.GitHubCLIError("Connection timeout",None)
+        with tempfile.TemporaryDirectory() as t:
+            client=o.Client(t)
+            with patch.object(client,"preflight",return_value={"repo":"owner/worker","commit":"test"}):
+                with self.assertRaises(o.GitHubCLIError):client.submit("owner/worker",manifest())
+            self.assertEqual(client._records()[0]["dispatch_status"],"unknown")
+            with patch.object(client,"preflight",return_value={"repo":"owner/worker","commit":"test"}),patch.object(client,"status",return_value={"runs":[]}):
+                with self.assertRaises(o.ObservatoryError):client.submit("owner/worker",manifest())
     def test_mac_never_runs_heavy_worker(self):
         with patch.dict("os.environ",{},clear=True):
             with self.assertRaises(o.ObservatoryError):worker.hosted_guard()

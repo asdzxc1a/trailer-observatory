@@ -10,7 +10,7 @@ Standard GitHub-hosted compute on public repositories is free. Larger runners ar
 
 ## Install the local Codex plugin
 
-This folder contains the supported `.codex-plugin/plugin.json` compatibility manifest, `.mcp.json`, skill, and local marketplace. After review, a local install can use:
+This folder contains the supported `.codex-plugin/plugin.json` compatibility manifest, `.mcp.json`, skill, and `.agents/plugins/marketplace.json` local marketplace. The marketplace source path `./` resolves to this repository's plugin root. After review, a local install can use:
 
 ```sh
 codex plugin marketplace add /absolute/path/to/trailer-observatory
@@ -44,7 +44,7 @@ The MCP manifest uses the built-in `${PLUGIN_ROOT}` placeholder. The persistent 
 
 ## Run and retrieve
 
-`preflight` reads public repository visibility and verifies all executable worker/control-plane files against this reviewed package. It refuses altered or paid-runner workflows. `submit` records an owned job ID before dispatch; it refuses overlapping owned dispatches. The workflow queues across the repository and uses 2 balanced shards. The vision model loads once per shard and repeated identical evidence reuses verified captions. Each progress line is compact.
+`preflight` reads public repository visibility and verifies all executable worker/control-plane files against this reviewed package. It refuses altered or paid-runner workflows. `submit` records an owned job ID before dispatch; it refuses overlapping owned dispatches. A definitive HTTP 401/403/404/422 rejection is preserved as `rejected` and does not masquerade as an active job. Transport timeouts and server errors remain unknown until verified, preventing duplicate dispatch. The workflow queues across the repository and uses 2 balanced shards. The vision model loads once per shard and repeated identical evidence reuses verified captions. Each progress line is compact.
 
 `status JOB_ID` is read-only and verifies the run's source commit. Use `inspect-runs OWNER/REPO` to inspect general runs. `cancel JOB_ID` acts only on a run dispatched and recorded by this client, never unrelated jobs. `fetch JOB_ID DESTINATION` requires a completed owned run and an empty/new destination. It retrieves plain-text logs only from the run's observation jobs, reconstructs indexed archives, verifies compressed hashes/size/counts, rejects traversal/links/unsafe types and caps expansion before writing. Then it merges shards, verifies every evidence hash, and creates `observations.jsonl`, `observations.csv`, `review.html`, `metrics.json`, `audit.json`, `benchmark.md`, `manifest.json`, and run provenance. Downloaded raw logs are removed once evidence is reconstructed.
 
