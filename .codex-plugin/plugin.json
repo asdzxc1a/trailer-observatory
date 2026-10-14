@@ -1,0 +1,19 @@
+{
+  "name": "trailer-observatory",
+  "version": "0.1.0",
+  "description": "Observe public YouTube trailers remotely with timestamped visual evidence and a free open vision model.",
+  "author": {"name": "Animation Trailer OS"},
+  "license": "MIT",
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "requires_local_executor": true,
+  "interface": {
+    "displayName": "Trailer Observatory",
+    "shortDescription": "Remote trailer evidence and edit benchmarks",
+    "longDescription": "A lightweight Python control plane dispatches public trailer research to a standard GitHub-hosted Linux worker. It returns one-second evidence bins, draft visual observations, contact review and measured pacing proxies without vidIQ, paid models, subscriptions or local video decoding.",
+    "developerName": "Animation Trailer OS",
+    "category": "Developer Tools",
+    "capabilities": ["Read", "Write"],
+    "defaultPrompt": ["Use Trailer Observatory to inspect an authorized public YouTube trailer corpus and compare its evidence metrics with my original trailer."]
+  }
+}

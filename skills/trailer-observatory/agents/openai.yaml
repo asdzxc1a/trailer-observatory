@@ -1,0 +1,4 @@
+interface:
+  display_name: "Trailer Observatory"
+  short_description: "Remote public trailer evidence and pacing analysis"
+  default_prompt: "Use $trailer-observatory to research public trailer references and compare my original edit with their timestamped visual evidence."

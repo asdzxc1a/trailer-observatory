@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "trailer_observatory": {
+      "type": "stdio",
+      "command": "python3",
+      "args": ["${PLUGIN_ROOT}/observatory.py", "mcp"],
+      "cwd": "${PLUGIN_ROOT}"
+    }
+  }
+}
